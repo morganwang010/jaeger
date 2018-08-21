@@ -17,7 +17,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -33,17 +32,17 @@ import (
 	"github.com/jaegertracing/jaeger/pkg/config"
 	pMetrics "github.com/jaegertracing/jaeger/pkg/metrics"
 	"github.com/jaegertracing/jaeger/pkg/version"
-	"github.com/jaegertracing/jaeger/plugin/storage"
+	"github.com/jaegertracing/jaeger/model"
 )
 
 func main() {
 	var signalsChannel = make(chan os.Signal, 0)
 	signal.Notify(signalsChannel, os.Interrupt, syscall.SIGTERM)
 
-	storageFactory, err := storage.NewFactory(storage.FactoryConfigFromEnvAndCLI(os.Args, os.Stderr))
-	if err != nil {
-		log.Fatalf("Cannot initialize storage factory: %v", err)
-	}
+	// storageFactory, err := storage.NewFactory(storage.FactoryConfigFromEnvAndCLI(os.Args, os.Stderr))
+	// if err != nil {
+	// 	log.Fatalf("Cannot initialize storage factory: %v", err)
+	// }
 
 	v := viper.New()
 	command := &cobra.Command{
@@ -73,14 +72,7 @@ func main() {
 			}
 			metricsFactory := baseFactory.Namespace("ingester", nil)
 
-			storageFactory.InitFromViper(v)
-			if err := storageFactory.Initialize(baseFactory, logger); err != nil {
-				logger.Fatal("Failed to init storage factory", zap.Error(err))
-			}
-			spanWriter, err := storageFactory.CreateSpanWriter()
-			if err != nil {
-				logger.Fatal("Failed to create span writer", zap.Error(err))
-			}
+			spanWriter := &printWriter{}
 
 			options := app.Options{}
 			options.InitFromViper(v)
@@ -98,12 +90,12 @@ func main() {
 				if err != nil {
 					logger.Error("Failed to close consumer", zap.Error(err))
 				}
-				if closer, ok := spanWriter.(io.Closer); ok {
-					err := closer.Close()
-					if err != nil {
-						logger.Error("Failed to close span writer", zap.Error(err))
-					}
-				}
+				// if closer, ok := spanWriter.(io.Closer); ok {
+				// 	err := closer.Close()
+				// 	if err != nil {
+				// 		logger.Error("Failed to close span writer", zap.Error(err))
+				// 	}
+				// }
 				logger.Info("Jaeger Ingester has finished closing")
 			}
 			return nil
@@ -118,7 +110,6 @@ func main() {
 		command,
 		flags.AddConfigFileFlag,
 		flags.AddFlags,
-		storageFactory.AddFlags,
 		pMetrics.AddFlags,
 		app.AddFlags,
 	)
@@ -127,4 +118,14 @@ func main() {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
+}
+
+type printWriter struct {
+	logger *zap.Logger
+	io.Closer
+}
+
+func (w *printWriter) WriteSpan(span *model.Span) error {
+	w.logger.Info("Got span", zap.String("traceId", span.TraceID.String()), zap.String("spanId", span.SpanID.String()))
+	return nil
 }
